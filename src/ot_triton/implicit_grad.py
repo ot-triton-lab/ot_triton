@@ -260,19 +260,21 @@ def implicit_grad_x(
     allow_tf32: bool = False,
     use_exp2: bool = True,
     autotune: bool = True,
-    use_flashstyle: bool = True,
+    use_flashstyle: Optional[bool] = None,  # Deprecated, FlashSinkhorn is the only backend
 ) -> Tuple[torch.Tensor, ImplicitGradInfo]:
     """End-to-end implicit gradient: solve Sinkhorn then compute ∂L/∂x.
 
     This is equivalent to calling jax.grad on a loss through OTT-JAX Sinkhorn
     with ImplicitDiff.
-
-    Parameters
-    ----------
-    use_flashstyle : bool
-        If True (default), use FlashStyle kernels which are faster for n >= 5000.
-        If False, use OTT-style kernels (for backwards compatibility).
     """
+    import warnings
+    if use_flashstyle is not None and not use_flashstyle:
+        warnings.warn(
+            "use_flashstyle=False is deprecated. FlashSinkhorn is now the only backend.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+
     from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
         sinkhorn_flashstyle_symmetric,
         standard_to_shifted_potentials,
@@ -291,40 +293,23 @@ def implicit_grad_x(
         use_exp2=use_exp2,
     )
 
-    if use_flashstyle:
-        # Convert to shifted potentials for FlashStyle kernels
-        alpha = cost_scale * (x.float() ** 2).sum(dim=1)
-        beta = cost_scale * (y.float() ** 2).sum(dim=1)
-        f_hat, g_hat = standard_to_shifted_potentials(f, g, alpha, beta)
-        log_a = torch.log(a.clamp(min=1e-20))
-        log_b = torch.log(b.clamp(min=1e-20))
+    # Convert to shifted potentials for FlashSinkhorn kernels
+    alpha = cost_scale * (x.float() ** 2).sum(dim=1)
+    beta = cost_scale * (y.float() ** 2).sum(dim=1)
+    f_hat, g_hat = standard_to_shifted_potentials(f, g, alpha, beta)
+    log_a = torch.log(a.clamp(min=1e-20))
+    log_b = torch.log(b.clamp(min=1e-20))
 
-        return implicit_grad_x_from_potentials(
-            x, y, f_hat, g_hat, grad_f, grad_g,
-            eps=eps,
-            log_a=log_a,
-            log_b=log_b,
-            cost_scale=cost_scale,
-            tau2=tau2,
-            max_cg_iter=max_cg_iter,
-            cg_rtol=cg_rtol,
-            cg_atol=cg_atol,
-            allow_tf32=allow_tf32,
-            use_exp2=use_exp2,
-        )
-    else:
-        # Convert to OTT-style potentials for backwards compatibility
-        from ot_triton.hvp import geomloss_to_ott_potentials
-        f_hat, g_hat = geomloss_to_ott_potentials(f, g, a, b, eps=eps)
-
-        return implicit_grad_x_from_potentials(
-            x, y, f_hat, g_hat, grad_f, grad_g,
-            eps=eps,
-            cost_scale=cost_scale,
-            tau2=tau2,
-            max_cg_iter=max_cg_iter,
-            cg_rtol=cg_rtol,
-            cg_atol=cg_atol,
-            allow_tf32=allow_tf32,
-            use_exp2=use_exp2,
-        )
+    return implicit_grad_x_from_potentials(
+        x, y, f_hat, g_hat, grad_f, grad_g,
+        eps=eps,
+        log_a=log_a,
+        log_b=log_b,
+        cost_scale=cost_scale,
+        tau2=tau2,
+        max_cg_iter=max_cg_iter,
+        cg_rtol=cg_rtol,
+        cg_atol=cg_atol,
+        allow_tf32=allow_tf32,
+        use_exp2=use_exp2,
+    )

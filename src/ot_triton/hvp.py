@@ -114,7 +114,7 @@ def sinkhorn_prelast_potentials_sqeuclid(
     block_k: Optional[int] = None,  # Ignored, kept for backward compat
     num_warps: Optional[int] = None,  # Ignored, kept for backward compat
     num_stages: int = 2,  # Ignored, kept for backward compat
-    use_flashstyle: bool = True,  # Deprecated, always uses FlashSinkhorn now
+    use_flashstyle: Optional[bool] = None,  # Deprecated, FlashSinkhorn is the only backend
     cost_scale: float = 1.0,  # Cost scaling (1.0 for full, 0.5 for half)
     rho_x: Optional[float] = None,  # Unbalanced OT source penalty
     rho_y: Optional[float] = None,  # Unbalanced OT target penalty
@@ -128,14 +128,19 @@ def sinkhorn_prelast_potentials_sqeuclid(
         allow_tf32: Enable TF32 for matmul
         use_exp2: Use exp2/log2 optimization
         autotune: Enable kernel autotuning
-        use_flashstyle: Deprecated, always uses FlashSinkhorn now.
         cost_scale: Cost scaling (1.0 for full ||x-y||², 0.5 for half)
         rho_x, rho_y: Unbalanced OT marginal penalties (None = balanced)
 
     Returns:
         f_grad, g_grad: Pre-extrapolation potentials at final epsilon
     """
-    # Always use FlashSinkhorn (old kernel deprecated)
+    if use_flashstyle is not None and not use_flashstyle:
+        import warnings
+        warnings.warn(
+            "use_flashstyle=False is deprecated. FlashSinkhorn is now the only backend.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
     f_cost, g_cost, f_grad, g_grad = sinkhorn_flashstyle_symmetric(
         x,
         y,
@@ -284,7 +289,9 @@ def hvp_x_sqeuclid_from_potentials(
     # FlashStyle convention: P = a * b * exp((f_shift + g_shift + 2*cs*xy) / eps)
     #
     # Conversion: f_shift = f_hat - eps*log_a - alpha (where alpha = cs*||x||²)
-    # For balanced OT, assume uniform marginals: log_a = -log(n), log_b = -log(m)
+    # log_a, log_b are a gauge choice: they cancel in the conversion+application
+    # roundtrip (f_shift absorbs -eps*log_a, kernel re-adds +log_a). Any constant
+    # works; uniform -log(n) is conventional.
     log_a = torch.full((n,), -math.log(n), device=x.device, dtype=torch.float32)
     log_b = torch.full((m,), -math.log(m), device=x.device, dtype=torch.float32)
     alpha = cost_scale * x_norm2

@@ -11,10 +11,8 @@ geomloss = pytest.importorskip("geomloss")
 from geomloss.sinkhorn_samples import sinkhorn_tensorized
 
 from ot_triton import SamplesLoss
-from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import (
-    max_diameter,
-    sinkhorn_geomloss_online_potentials_sqeuclid,
-)
+from ot_triton.kernels._common import max_diameter
+from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import sinkhorn_flashstyle_symmetric
 
 
 def _sqdist_cost(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -64,7 +62,7 @@ class TestUnbalancedPotentials:
         g_geo = g_geo.squeeze()
 
         # OT Triton
-        f_tri, g_tri = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_tri, g_tri = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             scaling=scaling,
@@ -111,7 +109,7 @@ class TestUnbalancedPotentials:
         g_geo = g_geo.squeeze()
 
         # OT Triton (balanced)
-        f_tri, g_tri = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_tri, g_tri = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             scaling=scaling,
@@ -166,7 +164,7 @@ class TestUnbalancedCost:
         f_geo = f_geo.squeeze()
         g_geo = g_geo.squeeze()
 
-        f_tri, g_tri = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_tri, g_tri = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             scaling=scaling,
@@ -200,12 +198,12 @@ class TestDampeningBehavior:
         blur = 0.5
 
         # Large reach (closer to balanced)
-        f_large, g_large = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_large, g_large = sinkhorn_flashstyle_symmetric(
             x, y, a, b, blur=blur, reach=10.0, autotune=False, use_exp2=False
         )
 
         # Small reach (stronger relaxation)
-        f_small, g_small = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_small, g_small = sinkhorn_flashstyle_symmetric(
             x, y, a, b, blur=blur, reach=0.5, autotune=False, use_exp2=False
         )
 
@@ -254,7 +252,7 @@ class TestSemiUnbalancedOT:
         reach = 1.0
 
         # Using legacy reach parameter
-        f_legacy, g_legacy = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_legacy, g_legacy = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach=reach,
@@ -263,7 +261,7 @@ class TestSemiUnbalancedOT:
         )
 
         # Using new reach_x/reach_y parameters
-        f_new, g_new = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_new, g_new = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach_x=reach,
@@ -282,7 +280,7 @@ class TestSemiUnbalancedOT:
         reach_x = 1.0
 
         # Semi-unbalanced: relax source, strict target
-        f_semi, g_semi = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_semi, g_semi = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach_x=reach_x,
@@ -292,7 +290,7 @@ class TestSemiUnbalancedOT:
         )
 
         # Balanced case for comparison
-        f_bal, g_bal = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_bal, g_bal = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach_x=None,
@@ -318,7 +316,7 @@ class TestSemiUnbalancedOT:
         reach_y = 1.0
 
         # Semi-unbalanced: strict source, relax target
-        f_semi, g_semi = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_semi, g_semi = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach_x=None,  # Source marginal is strict
@@ -328,7 +326,7 @@ class TestSemiUnbalancedOT:
         )
 
         # Balanced case for comparison
-        f_bal, g_bal = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_bal, g_bal = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach_x=None,
@@ -352,7 +350,7 @@ class TestSemiUnbalancedOT:
         reach_x = 0.5  # Strong relaxation on source
         reach_y = 5.0  # Weak relaxation on target
 
-        f_asym, g_asym = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_asym, g_asym = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach_x=reach_x,
@@ -362,7 +360,7 @@ class TestSemiUnbalancedOT:
         )
 
         # Compare with symmetric case
-        f_sym, g_sym = sinkhorn_geomloss_online_potentials_sqeuclid(
+        f_sym, g_sym = sinkhorn_flashstyle_symmetric(
             x, y, a, b,
             blur=blur,
             reach=1.0,  # Equal reach for both
@@ -484,6 +482,82 @@ class TestSemiUnbalancedOT:
         print(f"  reach_x=None, reach_y=1.0: {cost_y.item():.6f}")
         print(f"  reach=1.0 (both):          {cost_unbal.item():.6f}")
         print(f"  balanced:                  {cost_bal.item():.6f}")
+
+
+class TestAlternatingUnbalancedParity:
+    """Regression tests for alternating backend with unbalanced OT.
+
+    Locks fix for the rho/reach double-squaring bug: _autograd.py previously
+    passed config.rho_x (already reach^2) to a reach_x parameter, which
+    squared it again, giving rho = reach^4 instead of reach^2.
+    """
+
+    @pytest.mark.parametrize("reach", [1.0, 2.0, 5.0])
+    def test_autograd_vs_direct_cost(self, sample_data, reach):
+        """SamplesLoss (autograd path) must match direct solver cost."""
+        x, y, a, b = sample_data
+        eps = 0.1
+        n_iters = 50
+
+        # Autograd path (goes through _SinkhornCostFn)
+        loss_fn = SamplesLoss(
+            loss="sinkhorn",
+            backend="alternating",
+            eps=eps,
+            n_iters=n_iters,
+            use_epsilon_scaling=False,
+            reach=reach,
+            half_cost=True,
+            debias=False,
+        )
+        cost_autograd = loss_fn(a, x, b, y)
+
+        # Direct solver path
+        from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+            sinkhorn_flashstyle_alternating,
+        )
+        rho = reach ** 2
+        f, g = sinkhorn_flashstyle_alternating(
+            x, y, a, b,
+            eps=eps,
+            n_iters=n_iters,
+            cost_scale=0.5,
+            rho_x=rho,
+            rho_y=rho,
+        )
+        cost_direct = (a * f).sum() + (b * g).sum()
+
+        rel_err = abs(cost_autograd.item() - cost_direct.item()) / (
+            abs(cost_direct.item()) + 1e-12
+        )
+        assert rel_err < 1e-4, (
+            f"Autograd vs direct cost mismatch at reach={reach}: "
+            f"autograd={cost_autograd.item():.6f}, direct={cost_direct.item():.6f}, "
+            f"rel_err={rel_err:.2e}"
+        )
+
+    @pytest.mark.parametrize(
+        "reach_x,reach_y",
+        [(1.0, None), (None, 2.0), (1.0, 5.0)],
+    )
+    def test_semi_unbalanced_alternating(self, sample_data, reach_x, reach_y):
+        """Semi-unbalanced alternating OT through SamplesLoss must be finite."""
+        x, y, a, b = sample_data
+        loss_fn = SamplesLoss(
+            loss="sinkhorn",
+            backend="alternating",
+            eps=0.1,
+            n_iters=50,
+            use_epsilon_scaling=False,
+            reach_x=reach_x,
+            reach_y=reach_y,
+            half_cost=True,
+            debias=False,
+        )
+        cost = loss_fn(a, x, b, y)
+        assert torch.isfinite(cost), (
+            f"Non-finite cost with reach_x={reach_x}, reach_y={reach_y}: {cost.item()}"
+        )
 
 
 if __name__ == "__main__":

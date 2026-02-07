@@ -4,8 +4,8 @@ import torch
 from ot_triton import SamplesLoss
 from ot_triton.hvp import geomloss_to_ott_potentials
 from ot_triton.hvp import hvp_x_sqeuclid_from_potentials
-from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import (
-    sinkhorn_geomloss_online_potentials_sqeuclid,
+from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+    sinkhorn_flashstyle_symmetric,
 )
 from ot_triton.testing.reference_sinkhorn import sinkhorn_geomloss_barycentric_grads_ref
 
@@ -114,7 +114,7 @@ def test_samplesloss_matches_kernel_wrapper_for_potentials():
 
     f_api, g_api = loss(a, x, b, y)
 
-    f_k, g_k = sinkhorn_geomloss_online_potentials_sqeuclid(
+    f_k, g_k = sinkhorn_flashstyle_symmetric(
         x,
         y,
         a,
@@ -126,10 +126,6 @@ def test_samplesloss_matches_kernel_wrapper_for_potentials():
         n_iters=2,
         allow_tf32=False,
         autotune=False,
-        block_m=64,
-        block_n=64,
-        block_k=32,
-        num_warps=4,
     )
 
     torch.testing.assert_close(f_api, f_k, rtol=1e-5, atol=1e-5)
@@ -247,7 +243,7 @@ def test_samplesloss_backward_matches_explicit_plan_grads():
     grad_x, grad_y = torch.autograd.grad(val, (x, y))
 
     with torch.no_grad():
-        _, _, f, g = sinkhorn_geomloss_online_potentials_sqeuclid(
+        _, _, f, g = sinkhorn_flashstyle_symmetric(
             x.detach(),
             y.detach(),
             a,
@@ -261,10 +257,6 @@ def test_samplesloss_backward_matches_explicit_plan_grads():
             eps=eps,
             n_iters=n_iters,
             autotune=False,
-            block_m=64,
-            block_n=64,
-            block_k=32,
-            num_warps=4,
             return_prelast=True,
         )
         grad_x_ref, grad_y_ref = sinkhorn_geomloss_barycentric_grads_ref(
@@ -322,7 +314,7 @@ def test_samplesloss_double_backward_matches_hvp_x_reference():
     hvp_autograd = torch.autograd.grad((grad_x * v).sum(), x)[0]
 
     with torch.no_grad():
-        _, _, f_grad, g_grad = sinkhorn_geomloss_online_potentials_sqeuclid(
+        _, _, f_grad, g_grad = sinkhorn_flashstyle_symmetric(
             x.detach(),
             y,
             a,
@@ -336,10 +328,6 @@ def test_samplesloss_double_backward_matches_hvp_x_reference():
             eps=eps,
             n_iters=n_iters,
             autotune=False,
-            block_m=64,
-            block_n=64,
-            block_k=32,
-            num_warps=4,
             return_prelast=True,
         )
         f_hat, g_hat = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)

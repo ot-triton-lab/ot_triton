@@ -12,6 +12,10 @@ Where:
     - R = Jacobian of optimality conditions w.r.t. x
     - H* = Schur complement of the Hessian of Lagrangian
     - E = Explicit Hessian term (5 matrix terms)
+
+NOTE: These tests require optional dependencies (KeOps, JAX with GPU).
+They will be skipped if those dependencies are not available or fail to initialize.
+JAX GPU often fails due to cuDNN version conflicts with PyTorch.
 """
 
 import pytest
@@ -31,11 +35,12 @@ def test_hvp_parity_flashsinkhorn_vs_ott_hessian_keops():
     if ott_hessian_path not in sys.path:
         sys.path.insert(0, ott_hessian_path)
 
-    # Skip if OTT-Hessian not available (private dependency)
-    torch_sinkhorn_hessian = pytest.importorskip("torch_sinkhorn_hessian", reason="OTT-Hessian not available")
-    from torch_sinkhorn_hessian import TorchSinkhornHessian, TorchOTResult, _TorchGeometry
-    from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import (
-        sinkhorn_geomloss_online_potentials_sqeuclid,
+    try:
+        from torch_sinkhorn_hessian import TorchSinkhornHessian, TorchOTResult, _TorchGeometry
+    except ImportError:
+        pytest.skip("torch_sinkhorn_hessian not available (requires 3rd-party/OTT-Hessian)")
+    from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+        sinkhorn_flashstyle_symmetric,
     )
     from ot_triton.hvp import hvp_x_sqeuclid_from_potentials, geomloss_to_ott_potentials
 
@@ -53,7 +58,7 @@ def test_hvp_parity_flashsinkhorn_vs_ott_hessian_keops():
     A = torch.randn(n, d, device=device, dtype=torch.float32)
 
     # Get shared potentials
-    f_geo, g_geo = sinkhorn_geomloss_online_potentials_sqeuclid(
+    f_geo, g_geo = sinkhorn_flashstyle_symmetric(
         x, y, a, b,
         use_epsilon_scaling=False,
         eps=eps,
@@ -131,15 +136,16 @@ def test_hvp_parity_flashsinkhorn_vs_ott_hessian_jax():
     if ott_hessian_path not in sys.path:
         sys.path.insert(0, ott_hessian_path)
 
-    # Skip if OTT-Hessian not available (private dependency)
-    pytest.importorskip("SinkhornHessian", reason="OTT-Hessian JAX not available")
-    from SinkhornHessian import HessianALineax as HessianA  # Use lineax version
+    try:
+        from SinkhornHessian import HessianALineax as HessianA  # Use lineax version
+    except ImportError:
+        pytest.skip("SinkhornHessian not available (requires 3rd-party/OTT-Hessian)")
     from ott.geometry import pointcloud
     from ott.problems.linear import linear_problem
     from ott.solvers.linear import sinkhorn
 
-    from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import (
-        sinkhorn_geomloss_online_potentials_sqeuclid,
+    from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+        sinkhorn_flashstyle_symmetric,
     )
     from ot_triton.hvp import hvp_x_sqeuclid_from_potentials, geomloss_to_ott_potentials
 
@@ -166,7 +172,7 @@ def test_hvp_parity_flashsinkhorn_vs_ott_hessian_jax():
     A_jax = jnp.array(A_torch.cpu().numpy())
 
     # FlashSinkhorn: Get potentials and compute HVP
-    f_geo, g_geo = sinkhorn_geomloss_online_potentials_sqeuclid(
+    f_geo, g_geo = sinkhorn_flashstyle_symmetric(
         x_torch, y_torch, a_torch, b_torch,
         use_epsilon_scaling=False,
         eps=eps,
@@ -233,17 +239,20 @@ def test_hvp_parity_all_three_methods():
     if ott_hessian_path not in sys.path:
         sys.path.insert(0, ott_hessian_path)
 
-    # Skip if OTT-Hessian not available (private dependency)
-    pytest.importorskip("torch_sinkhorn_hessian", reason="OTT-Hessian not available")
-    pytest.importorskip("SinkhornHessian", reason="OTT-Hessian JAX not available")
-    from torch_sinkhorn_hessian import TorchSinkhornHessian, TorchOTResult, _TorchGeometry
-    from SinkhornHessian import HessianALineax as HessianA  # Use lineax version
+    try:
+        from torch_sinkhorn_hessian import TorchSinkhornHessian, TorchOTResult, _TorchGeometry
+    except ImportError:
+        pytest.skip("torch_sinkhorn_hessian not available (requires 3rd-party/OTT-Hessian)")
+    try:
+        from SinkhornHessian import HessianALineax as HessianA  # Use lineax version
+    except ImportError:
+        pytest.skip("SinkhornHessian not available (requires 3rd-party/OTT-Hessian)")
     from ott.geometry import pointcloud
     from ott.problems.linear import linear_problem
     from ott.solvers.linear import sinkhorn as ott_sinkhorn
 
-    from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import (
-        sinkhorn_geomloss_online_potentials_sqeuclid,
+    from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+        sinkhorn_flashstyle_symmetric,
     )
     from ot_triton.hvp import hvp_x_sqeuclid_from_potentials, geomloss_to_ott_potentials
 
@@ -265,7 +274,7 @@ def test_hvp_parity_all_three_methods():
     A = torch.randn(n, d, device=device, dtype=torch.float32)
 
     # Get SHARED potentials from FlashSinkhorn
-    f_geo, g_geo = sinkhorn_geomloss_online_potentials_sqeuclid(
+    f_geo, g_geo = sinkhorn_flashstyle_symmetric(
         x, y, a, b,
         use_epsilon_scaling=False,
         eps=eps,

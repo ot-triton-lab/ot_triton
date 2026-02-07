@@ -23,6 +23,7 @@ import triton
 import triton.language as tl
 
 # Import the non-fused implementation for fallback
+from ot_triton.kernels._triton_helpers import _tiled_dot
 from ot_triton.kernels.sinkhorn_triton_apply_sqeuclid import apply_plan_vec_flashstyle
 from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import standard_to_shifted_potentials
 
@@ -162,21 +163,12 @@ def _fused_schur_matvec_kernel(
             z_local = tl.load(z_ptr + offs_n * stride_z, mask=mask_n, other=0.0).to(tl.float32)
 
             # Compute dot product x_i @ y_j
-            dot = tl.zeros([BLOCK_M, BLOCK_N], tl.float32)
-            for k0 in range(0, D, BLOCK_K):
-                offs_k = k0 + tl.arange(0, BLOCK_K)
-                mask_k = offs_k < D
-                x_tile = tl.load(
-                    x_ptr + offs_m[:, None] * stride_x0 + offs_k[None, :] * stride_x1,
-                    mask=mask_m[:, None] & mask_k[None, :],
-                    other=0.0,
-                )
-                y_tile = tl.load(
-                    y_ptr + offs_n[None, :] * stride_y0 + offs_k[:, None] * stride_y1,
-                    mask=mask_n[None, :] & mask_k[:, None],
-                    other=0.0,
-                )
-                dot += tl.dot(x_tile, y_tile, allow_tf32=ALLOW_TF32)
+            dot = _tiled_dot(
+                x_ptr, y_ptr, offs_m, offs_n,
+                stride_x0, stride_x1, stride_y0, stride_y1,
+                D, mask_m, mask_n,
+                BLOCK_M, BLOCK_N, BLOCK_K, ALLOW_TF32,
+            )
 
             # Compute log-kernel values
             cost = x2_local[:, None] + y2_local[None, :] - 2.0 * dot
@@ -248,21 +240,12 @@ def _fused_schur_matvec_kernel(
             scaled_piz = piz_local / diag_x_safe
 
             # Compute dot product x_i @ y_j
-            dot = tl.zeros([BLOCK_M, BLOCK_N], tl.float32)
-            for k0 in range(0, D, BLOCK_K):
-                offs_k = k0 + tl.arange(0, BLOCK_K)
-                mask_k = offs_k < D
-                x_tile = tl.load(
-                    x_ptr + offs_m[:, None] * stride_x0 + offs_k[None, :] * stride_x1,
-                    mask=mask_m[:, None] & mask_k[None, :],
-                    other=0.0,
-                )
-                y_tile = tl.load(
-                    y_ptr + offs_n[None, :] * stride_y0 + offs_k[:, None] * stride_y1,
-                    mask=mask_n[None, :] & mask_k[:, None],
-                    other=0.0,
-                )
-                dot += tl.dot(x_tile, y_tile, allow_tf32=ALLOW_TF32)
+            dot = _tiled_dot(
+                x_ptr, y_ptr, offs_m, offs_n,
+                stride_x0, stride_x1, stride_y0, stride_y1,
+                D, mask_m, mask_n,
+                BLOCK_M, BLOCK_N, BLOCK_K, ALLOW_TF32,
+            )
 
             # Compute log-kernel values
             cost = x2_local[:, None] + y2_local[None, :] - 2.0 * dot

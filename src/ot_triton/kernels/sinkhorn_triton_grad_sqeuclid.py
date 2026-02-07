@@ -7,7 +7,8 @@ import triton
 import triton.language as tl
 
 from ot_triton.kernels._common import _cache_key_bucket
-from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import log_weights
+from ot_triton.kernels._triton_helpers import _tiled_dot
+from ot_triton.kernels._common import log_weights
 
 
 def _grad_autotune_configs() -> Sequence[triton.Config]:
@@ -211,28 +212,12 @@ def _geomloss_grad_sqeuclid_impl(
                 eviction_policy="evict_first",
             ).to(tl.float32)
 
-            dot = tl.zeros([BLOCK_M, BLOCK_N], tl.float32)
-            for k0 in range(0, D, BLOCK_K):
-                k0 = tl.multiple_of(k0, BLOCK_K)
-                offs_k = k0 + tl.arange(0, BLOCK_K)
-                mask_k = offs_k < D
-                xk = tl.load(
-                    x_ptr
-                    + offs_m[:, None] * stride_x0
-                    + offs_k[None, :] * stride_x1,
-                    mask=mask_m[:, None] & mask_k[None, :],
-                    other=0.0,
-                    eviction_policy="evict_first",
-                )
-                yk = tl.load(
-                    y_ptr
-                    + offs_n[None, :] * stride_y0
-                    + offs_k[:, None] * stride_y1,
-                    mask=mask_n[None, :] & mask_k[:, None],
-                    other=0.0,
-                    eviction_policy="evict_first",
-                )
-                dot += tl.dot(xk, yk, allow_tf32=ALLOW_TF32)
+            dot = _tiled_dot(
+                x_ptr, y_ptr, offs_m, offs_n,
+                stride_x0, stride_x1, stride_y0, stride_y1,
+                D, mask_m, mask_n,
+                BLOCK_M, BLOCK_N, BLOCK_K, ALLOW_TF32,
+            )
 
             # Compute Euclidean cost
             euclidean_cost = cost_scale * (x2[:, None] + y2 - 2.0 * dot)
@@ -347,24 +332,12 @@ def _geomloss_grad_sqeuclid_impl(
             eviction_policy="evict_first",
         ).to(tl.float32)
 
-        dot = tl.zeros([BLOCK_M, BLOCK_N], tl.float32)
-        for k0 in range(0, D, BLOCK_K):
-            k0 = tl.multiple_of(k0, BLOCK_K)
-            offs_k = k0 + tl.arange(0, BLOCK_K)
-            mask_k = offs_k < D
-            xk = tl.load(
-                x_ptr + offs_m[:, None] * stride_x0 + offs_k[None, :] * stride_x1,
-                mask=mask_m[:, None] & mask_k[None, :],
-                other=0.0,
-                eviction_policy="evict_first",
-            )
-            yk = tl.load(
-                y_ptr + offs_n[None, :] * stride_y0 + offs_k[:, None] * stride_y1,
-                mask=mask_n[None, :] & mask_k[:, None],
-                other=0.0,
-                eviction_policy="evict_first",
-            )
-            dot += tl.dot(xk, yk, allow_tf32=ALLOW_TF32)
+        dot = _tiled_dot(
+            x_ptr, y_ptr, offs_m, offs_n,
+            stride_x0, stride_x1, stride_y0, stride_y1,
+            D, mask_m, mask_n,
+            BLOCK_M, BLOCK_N, BLOCK_K, ALLOW_TF32,
+        )
 
         # Compute Euclidean cost
         euclidean_cost = cost_scale * (x2 + y2[None, :] - 2.0 * dot)
@@ -545,28 +518,12 @@ def _geomloss_grad_sqeuclid_large_d_impl(
                 eviction_policy="evict_first",
             ).to(tl.float32)
 
-            dot = tl.zeros([BLOCK_M, BLOCK_N], tl.float32)
-            for k0 in range(0, D, BLOCK_K):
-                k0 = tl.multiple_of(k0, BLOCK_K)
-                offs_k = k0 + tl.arange(0, BLOCK_K)
-                mask_k = offs_k < D
-                xk = tl.load(
-                    x_ptr
-                    + offs_m[:, None] * stride_x0
-                    + offs_k[None, :] * stride_x1,
-                    mask=mask_m[:, None] & mask_k[None, :],
-                    other=0.0,
-                    eviction_policy="evict_first",
-                )
-                yk = tl.load(
-                    y_ptr
-                    + offs_n[None, :] * stride_y0
-                    + offs_k[:, None] * stride_y1,
-                    mask=mask_n[None, :] & mask_k[:, None],
-                    other=0.0,
-                    eviction_policy="evict_first",
-                )
-                dot += tl.dot(xk, yk, allow_tf32=ALLOW_TF32)
+            dot = _tiled_dot(
+                x_ptr, y_ptr, offs_m, offs_n,
+                stride_x0, stride_x1, stride_y0, stride_y1,
+                D, mask_m, mask_n,
+                BLOCK_M, BLOCK_N, BLOCK_K, ALLOW_TF32,
+            )
 
             # Compute Euclidean cost
             euclidean_cost = cost_scale * (x2[:, None] + y2 - 2.0 * dot)
@@ -726,24 +683,12 @@ def _geomloss_grad_sqeuclid_large_d_impl(
             eviction_policy="evict_first",
         ).to(tl.float32)
 
-        dot = tl.zeros([BLOCK_M, BLOCK_N], tl.float32)
-        for k0 in range(0, D, BLOCK_K):
-            k0 = tl.multiple_of(k0, BLOCK_K)
-            offs_k = k0 + tl.arange(0, BLOCK_K)
-            mask_k = offs_k < D
-            xk = tl.load(
-                x_ptr + offs_m[:, None] * stride_x0 + offs_k[None, :] * stride_x1,
-                mask=mask_m[:, None] & mask_k[None, :],
-                other=0.0,
-                eviction_policy="evict_first",
-            )
-            yk = tl.load(
-                y_ptr + offs_n[None, :] * stride_y0 + offs_k[:, None] * stride_y1,
-                mask=mask_n[None, :] & mask_k[:, None],
-                other=0.0,
-                eviction_policy="evict_first",
-            )
-            dot += tl.dot(xk, yk, allow_tf32=ALLOW_TF32)
+        dot = _tiled_dot(
+            x_ptr, y_ptr, offs_m, offs_n,
+            stride_x0, stride_x1, stride_y0, stride_y1,
+            D, mask_m, mask_n,
+            BLOCK_M, BLOCK_N, BLOCK_K, ALLOW_TF32,
+        )
 
         # Compute Euclidean cost
         euclidean_cost = cost_scale * (x2 + y2[None, :] - 2.0 * dot)

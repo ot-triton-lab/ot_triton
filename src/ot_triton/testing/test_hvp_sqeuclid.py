@@ -3,11 +3,11 @@ import torch
 
 from ot_triton.hvp import geomloss_to_ott_potentials
 from ot_triton.hvp import hvp_x_sqeuclid_from_potentials
-from ot_triton.kernels.sinkhorn_triton_apply_sqeuclid import apply_plan_vec_sqeuclid
-from ot_triton.kernels.sinkhorn_triton_apply_sqeuclid import apply_plan_mat_sqeuclid
+from ot_triton.kernels.sinkhorn_triton_apply_sqeuclid import apply_plan_vec_flashstyle
+from ot_triton.kernels.sinkhorn_triton_apply_sqeuclid import apply_plan_mat_flashstyle
 from ot_triton.kernels.sinkhorn_triton_apply_sqeuclid import mat5_sqeuclid
-from ot_triton.kernels.sinkhorn_triton_geomloss_sqeuclid import (
-    sinkhorn_geomloss_online_potentials_sqeuclid,
+from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+    sinkhorn_flashstyle_symmetric,
 )
 from ot_triton.testing.reference_hvp import plan_from_potentials
 from ot_triton.testing.reference_hvp import hvp_x_dense_sqeuclid
@@ -35,7 +35,7 @@ def test_hvp_x_matches_dense_reference_small():
     eps_list = [eps] * 4
 
     # Get prelast potentials (GeomLoss convention), then convert to OTT convention.
-    _, _, f_grad, g_grad = sinkhorn_geomloss_online_potentials_sqeuclid(
+    _, _, f_grad, g_grad = sinkhorn_flashstyle_symmetric(
         x,
         y,
         a,
@@ -47,10 +47,6 @@ def test_hvp_x_matches_dense_reference_small():
         eps_list=eps_list,
         autotune=False,
         return_prelast=True,
-        block_m=32,
-        block_n=32,
-        block_k=16,
-        num_warps=4,
     )
     f_hat, g_hat = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)
 
@@ -108,8 +104,9 @@ def test_apply_plan_vec_matches_dense_reference_small():
 
     eps = 0.2
     eps_list = [eps] * 4
+    cost_scale = 1.0
 
-    _, _, f_grad, g_grad = sinkhorn_geomloss_online_potentials_sqeuclid(
+    _, _, f_grad, g_grad = sinkhorn_flashstyle_symmetric(
         x,
         y,
         a,
@@ -121,23 +118,36 @@ def test_apply_plan_vec_matches_dense_reference_small():
         eps_list=eps_list,
         autotune=False,
         return_prelast=True,
-        block_m=32,
-        block_n=32,
-        block_k=16,
-        num_warps=4,
     )
-    f_hat, g_hat = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)
-    P = plan_from_potentials(x, y, f_hat, g_hat, eps=eps)
+    f_ott, g_ott = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)
+    P = plan_from_potentials(x, y, f_ott, g_ott, eps=eps)
+
+    # Compute shifts for FlashStyle kernels
+    alpha = cost_scale * (x ** 2).sum(dim=1)
+    beta = cost_scale * (y ** 2).sum(dim=1)
+
+    # Compute log marginals
+    log_a = torch.log(a)
+    log_b = torch.log(b)
+
+    # Convert OTT potentials to FlashStyle shifted potentials
+    # f_ott = f_std + eps * log_a, where f_std is standard potential
+    # f_hat = f_std - alpha = f_ott - eps * log_a - alpha
+    f_hat = f_ott - eps * log_a - alpha
+    g_hat = g_ott - eps * log_b - beta
 
     vec_m = torch.randn(m, device=device, dtype=torch.float32)
-    out_axis1 = apply_plan_vec_sqeuclid(
+    out_axis1 = apply_plan_vec_flashstyle(
         x,
         y,
         f_hat,
         g_hat,
+        log_a,
+        log_b,
         vec_m,
         eps=eps,
         axis=1,
+        cost_scale=cost_scale,
         block_m=32,
         block_n=32,
         block_k=16,
@@ -148,14 +158,17 @@ def test_apply_plan_vec_matches_dense_reference_small():
     torch.testing.assert_close(out_axis1, P @ vec_m, rtol=2e-4, atol=2e-4)
 
     vec_n = torch.randn(n, device=device, dtype=torch.float32)
-    out_axis0 = apply_plan_vec_sqeuclid(
+    out_axis0 = apply_plan_vec_flashstyle(
         x,
         y,
         f_hat,
         g_hat,
+        log_a,
+        log_b,
         vec_n,
         eps=eps,
         axis=0,
+        cost_scale=cost_scale,
         block_m=32,
         block_n=32,
         block_k=16,
@@ -176,7 +189,7 @@ def test_mat5_matches_dense_reference_small():
     eps = 0.2
     eps_list = [eps] * 4
 
-    _, _, f_grad, g_grad = sinkhorn_geomloss_online_potentials_sqeuclid(
+    _, _, f_grad, g_grad = sinkhorn_flashstyle_symmetric(
         x,
         y,
         a,
@@ -188,10 +201,6 @@ def test_mat5_matches_dense_reference_small():
         eps_list=eps_list,
         autotune=False,
         return_prelast=True,
-        block_m=32,
-        block_n=32,
-        block_k=16,
-        num_warps=4,
     )
     f_hat, g_hat = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)
     P = plan_from_potentials(x, y, f_hat, g_hat, eps=eps)
@@ -226,8 +235,9 @@ def test_apply_plan_mat_matches_dense_reference_small():
 
     eps = 0.2
     eps_list = [eps] * 4
+    cost_scale = 1.0
 
-    _, _, f_grad, g_grad = sinkhorn_geomloss_online_potentials_sqeuclid(
+    _, _, f_grad, g_grad = sinkhorn_flashstyle_symmetric(
         x,
         y,
         a,
@@ -239,58 +249,77 @@ def test_apply_plan_mat_matches_dense_reference_small():
         eps_list=eps_list,
         autotune=False,
         return_prelast=True,
-        block_m=32,
-        block_n=32,
-        block_k=16,
-        num_warps=4,
     )
-    f_hat, g_hat = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)
-    P = plan_from_potentials(x, y, f_hat, g_hat, eps=eps)
+    f_ott, g_ott = geomloss_to_ott_potentials(f_grad, g_grad, a, b, eps=eps)
+    P = plan_from_potentials(x, y, f_ott, g_ott, eps=eps)
 
-    Py = apply_plan_mat_sqeuclid(
+    # Compute shifts for FlashStyle kernels
+    alpha = cost_scale * (x ** 2).sum(dim=1)
+    beta = cost_scale * (y ** 2).sum(dim=1)
+
+    # Compute log marginals
+    log_a = torch.log(a)
+    log_b = torch.log(b)
+
+    # Convert OTT potentials to FlashStyle shifted potentials
+    f_hat = f_ott - eps * log_a - alpha
+    g_hat = g_ott - eps * log_b - beta
+
+    Py = apply_plan_mat_flashstyle(
         x,
         y,
         f_hat,
         g_hat,
+        log_a,
+        log_b,
         y,
         eps=eps,
         axis=1,
+        cost_scale=cost_scale,
         block_m=32,
         block_n=32,
         block_k=16,
         num_warps=4,
         use_exp2=False,
         allow_tf32=False,
+        autotune=False,
     )
     torch.testing.assert_close(Py, P @ y, rtol=2e-4, atol=2e-4)
 
     A = torch.randn(n, d, device=device, dtype=torch.float32)
-    PT_A = apply_plan_mat_sqeuclid(
+    PT_A = apply_plan_mat_flashstyle(
         x,
         y,
         f_hat,
         g_hat,
+        log_a,
+        log_b,
         A,
         eps=eps,
         axis=0,
+        cost_scale=cost_scale,
         block_m=32,
         block_n=32,
         block_k=16,
         num_warps=4,
         use_exp2=False,
         allow_tf32=False,
+        autotune=False,
     )
     torch.testing.assert_close(PT_A, P.t() @ A, rtol=2e-4, atol=2e-4)
 
     z2 = torch.randn(m, device=device, dtype=torch.float32)
-    Py_z2 = apply_plan_mat_sqeuclid(
+    Py_z2 = apply_plan_mat_flashstyle(
         x,
         y,
         f_hat,
         g_hat,
+        log_a,
+        log_b,
         y,
         eps=eps,
         axis=1,
+        cost_scale=cost_scale,
         scale=z2,
         block_m=32,
         block_n=32,
@@ -298,5 +327,6 @@ def test_apply_plan_mat_matches_dense_reference_small():
         num_warps=4,
         use_exp2=False,
         allow_tf32=False,
+        autotune=False,
     )
     torch.testing.assert_close(Py_z2, P @ (y * z2[:, None]), rtol=2e-4, atol=2e-4)

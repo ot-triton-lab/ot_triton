@@ -8,10 +8,13 @@ from ot_triton.testing.reference_sinkhorn import (
     sinkhorn_potentials_ref,
     sqeuclid_cost,
 )
+from ot_triton.kernels.sinkhorn_flashstyle_sqeuclid import (
+    sinkhorn_flashstyle_alternating,
+)
+# Keep low-level kernel imports for LSE and transport tests
 from ot_triton.kernels.sinkhorn_triton_ott_sqeuclid import (
     apply_lse_kernel_sqeuclid,
     apply_transport_from_potentials_sqeuclid,
-    sinkhorn_potentials_sqeuclid,
     update_potential,
 )
 
@@ -78,11 +81,17 @@ def test_sinkhorn_potentials_matches_ref():
     device = torch.device("cuda")
     n, m, d = 12, 10, 8
     x, y, _, _ = _rand_inputs(n, m, d, device)
-    loga = torch.log(torch.full((n,), 1.0 / n, device=device))
-    logb = torch.log(torch.full((m,), 1.0 / m, device=device))
+    a = torch.full((n,), 1.0 / n, device=device)
+    b = torch.full((m,), 1.0 / m, device=device)
+    loga = torch.log(a)
+    logb = torch.log(b)
     eps = 1.0
 
-    f_triton, g_triton = sinkhorn_potentials_sqeuclid(x, y, loga, logb, eps, n_iters=5)
+    # Use new FlashSinkhorn alternating solver with OTT convention
+    # to match the reference implementation which absorbs log marginals into potentials
+    f_triton, g_triton = sinkhorn_flashstyle_alternating(
+        x, y, a, b, eps=eps, n_iters=5, ott_convention=True
+    )
     f_ref, g_ref = sinkhorn_potentials_ref(x, y, loga, logb, eps, n_iters=5)
 
     torch.testing.assert_close(f_triton, f_ref, rtol=1e-3, atol=1e-3)
