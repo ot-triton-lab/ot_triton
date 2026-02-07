@@ -80,19 +80,31 @@ import torch
 
 
 def _preload_cuda_libs() -> None:
-    """Preload CUDA libraries for KeOps."""
-    os.environ.setdefault("CUDA_HOME", "/cm/shared/apps/cuda12.1/toolkit/12.1.1")
-    os.environ.setdefault("CUDA_PATH", "/cm/shared/apps/cuda12.1/toolkit/12.1.1")
-    paths = [
-        "/cm/shared/apps/cuda12.1/toolkit/12.1.1/targets/x86_64-linux/lib/libnvrtc.so.12",
-        "/cm/shared/apps/cuda12.1/toolkit/12.1.1/targets/x86_64-linux/lib/libnvrtc-builtins.so.12.1",
-        "/cm/shared/apps/cuda12.1/toolkit/12.1.1/targets/x86_64-linux/lib/libcudart.so.12",
-    ]
-    for path in paths:
+    """Preload CUDA libraries for KeOps.
+
+    Discovers CUDA_HOME from environment or PyTorch, then loads nvrtc/cudart
+    so that KeOps can find them at JIT compile time.
+    """
+    cuda_home = os.environ.get("CUDA_HOME") or os.environ.get("CUDA_PATH")
+    if cuda_home is None:
         try:
-            ctypes.CDLL(path, mode=ctypes.RTLD_GLOBAL)
+            from torch.utils.cpp_extension import CUDA_HOME as _ch
+            cuda_home = _ch
         except Exception:
             pass
+    if cuda_home is None:
+        return
+    os.environ.setdefault("CUDA_HOME", cuda_home)
+    os.environ.setdefault("CUDA_PATH", cuda_home)
+    lib_dir = Path(cuda_home) / "targets" / "x86_64-linux" / "lib"
+    if not lib_dir.is_dir():
+        lib_dir = Path(cuda_home) / "lib64"
+    for pattern in ("libnvrtc.so*", "libnvrtc-builtins.so*", "libcudart.so*"):
+        for lib in sorted(lib_dir.glob(pattern)):
+            try:
+                ctypes.CDLL(str(lib), mode=ctypes.RTLD_GLOBAL)
+            except Exception:
+                pass
 
 
 def _set_tf32(enabled: bool) -> None:
