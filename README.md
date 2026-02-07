@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="FlashSinkhorn.png" alt="FlashSinkhorn" width="100%">
+</p>
+
 # FlashSinkhorn
 
 **Streaming Entropic Optimal Transport in PyTorch + Triton**
