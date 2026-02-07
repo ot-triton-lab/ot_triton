@@ -24,7 +24,7 @@ IMPORTANT:
 - We measure `total_ms` = forward + backward combined (end-to-end gradient evaluation)
 - This is the only fair comparison because JAX's `jax.grad(f)` compiles into a single
   fused function that cannot be separated into forward/backward components
-- For forward-only timing, see bench_paper_forward.py (inference use case)
+- For forward-only timing, see bench_forward.py (inference use case)
 
 Cost convention:
 - FlashSinkhorn: C(x,y) = ||x-y||² (full squared Euclidean, half_cost=False default)
@@ -49,13 +49,13 @@ Timing methodology:
 
 Usage:
     # Default: TF32 enabled, autotuning on
-    python -m ot_triton.bench.bench_paper_backward
+    python -m ot_triton.bench.bench_backward
 
     # Strict FP32 (slower but higher precision)
-    python -m ot_triton.bench.bench_paper_backward --no-tf32
+    python -m ot_triton.bench.bench_backward --no-tf32
 
     # Check gradient parity first
-    python -m ot_triton.bench.bench_paper_backward --verify
+    python -m ot_triton.bench.bench_backward --verify
 """
 
 from __future__ import annotations
@@ -225,7 +225,7 @@ def bench_flashsinkhorn_backward(
         peak_memory_mb = torch.cuda.max_memory_allocated(device) / 1e6
 
         # Report forward_ms=-1, backward_ms=-1 (N/A) since we only measure total
-        # Forward-only timing is available in bench_paper_forward.py
+        # Forward-only timing is available in bench_forward.py
         return BackwardResult(method_name, n, m, d, eps, -1.0, -1.0, total_ms, peak_memory_mb, oom=False)
 
     except torch.cuda.OutOfMemoryError:
@@ -326,7 +326,7 @@ def bench_geomloss_backward(
         peak_memory_mb = torch.cuda.max_memory_allocated(device) / 1e6
 
         # Report forward_ms=-1, backward_ms=-1 (N/A) since we only measure total
-        # Forward-only timing is available in bench_paper_forward.py
+        # Forward-only timing is available in bench_forward.py
         return BackwardResult(method_name, n, m, d, eps, -1.0, -1.0, total_ms, peak_memory_mb, oom=False)
 
     except torch.cuda.OutOfMemoryError:
