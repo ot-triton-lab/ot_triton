@@ -129,18 +129,18 @@ Standard Sinkhorn loads 3 bias vectors per tile (g, log_b, y²). FlashSinkhorn p
 
 ### Performance (d=64, A100-80GB, 100 iterations)
 
-**Symmetric solver (vs previous GeomLoss-style kernel):**
+**Symmetric solver (vs v0.2.0 GeomLoss-style kernel):**
 
-| n | Previous | FlashSinkhorn | Speedup |
-|---|----------|---------------|---------|
+| n | v0.2.0 | v0.3.0 | Speedup |
+|---|--------|--------|---------|
 | 50,000 | 1730 ms | 1450 ms | **1.19x** |
 | 10,000 | 88 ms | 61 ms | **1.43x** |
 | 5,000 | 25 ms | 24 ms | 1.04x |
 
-**Alternating solver (vs previous OTT-style kernel, 10 iterations):**
+**Alternating solver (vs v0.2.0 OTT-style kernel, 10 iterations):**
 
-| n | Previous | FlashSinkhorn | Speedup |
-|---|----------|---------------|---------|
+| n | v0.2.0 | v0.3.0 | Speedup |
+|---|--------|--------|---------|
 | 50,000 | 137.9 ms | 102.6 ms | **1.34x** |
 | 20,000 | 25.7 ms | 21.7 ms | **1.19x** |
 | 10,000 | 8.9 ms | 8.3 ms | **1.07x** |
